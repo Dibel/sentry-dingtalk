@@ -6,7 +6,6 @@ install_requires = [
     'sentry>=9.1.0',
 ]
 
-
 setup(
     name='sentry-dingtalk',
     version='1.0.0',
@@ -36,4 +35,3 @@ setup(
         'Topic :: Software Development'
     ],
 )
-
