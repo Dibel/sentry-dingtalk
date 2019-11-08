@@ -3,11 +3,11 @@
 from setuptools import setup, find_packages
 
 install_requires = [
-    'sentry>=9.1.0',
+    'sentry==9.1.2',
 ]
 
 setup(
-    name='sentry-dingtalk',
+    name='sentry-dingtalk4',
     version='1.0.0',
     keywords='sentry dingding dingtalk',
     author='AdamWang',
@@ -23,7 +23,7 @@ setup(
     install_requires=install_requires,
     entry_points={
         'sentry.plugins': [
-            'dingtalk = sentry_dingtalk.plugin:DingtalkPlugin'
+            'dingtalk = sentry_dingtalk.plugin:DingtalkPlugin4'
         ],
     },
     include_package_data=True,

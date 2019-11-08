@@ -1,23 +1,24 @@
 from __future__ import absolute_import
 
-import time
+import base64
+import hashlib
+import hmac
 import json
-import requests
 import logging
-import six
-import sentry
+from datetime import datetime, timedelta
+from urllib import quote
 
+import requests
+import sentry
 from django import forms
 from django.conf import settings
 from django.utils.translation import ugettext_lazy as _
-
+from django.utils import timezone
 from sentry.exceptions import PluginError
+from sentry.http import is_valid_url
 from sentry.plugins.bases import notify
-from sentry.http import is_valid_url, safe_urlopen
-from sentry.utils.safe import safe_execute
-
 from sentry.utils.http import absolute_uri
-from django.core.urlresolvers import reverse
+from sentry.models.event import Event
 
 
 def validate_urls(value, **kwargs):
@@ -34,12 +35,18 @@ def validate_urls(value, **kwargs):
     return '\n'.join(output)
 
 
-class DingtalkForm(notify.NotificationConfigurationForm):
+class DingtalkForm(notify.NotificationbConfigurationForm):
     urls = forms.CharField(
-        label=_('Dingtalk robot url'),
+        label=_('Dingtalk robot webhook url'),
         widget=forms.Textarea(attrs={
             'class': 'span6', 'placeholder': 'https://oapi.dingtalk.com/robot/send?access_token=9bacf9b193f'}),
-        help_text=_('Enter dingtalk robot url.'))
+        help_text=_('Enter dingtalk robot webhook url.'))
+
+    secret = forms.CharField(
+        label=_('Dingtalk robot secret'),
+        widget=forms.Textarea(attrs={
+            'class': 'span6', 'placeholder': 'SEC013ee62d708fb270f2c3d2bd20c9aaxxxxx'}),
+        help_text=_('Enter dingtalk robot secret.'))
 
     def clean_url(self):
         value = self.cleaned_data.get('url')
@@ -47,13 +54,13 @@ class DingtalkForm(notify.NotificationConfigurationForm):
 
 
 class DingtalkPlugin(notify.NotificationPlugin):
-    author = 'ZhangShiJie'
-    author_url = 'https://github.com/zhangshj/sentry-dingtalk'
+    author = 'AdamWang'
+    author_url = 'https://github.com/AdamWangDoggie/sentry-dingtalk'
     version = sentry.VERSION
-    description = "Integrates dingtalk robot."
+    description = "Integrates dingtalk robot(dingtalk version>=4.7.15)."
     resource_links = [
-        ('Bug Tracker', 'https://github.com/zhangshj/sentry-dingtalk/issues'),
-        ('Source', 'https://github.com/zhangshj/sentry-dingtalk'),
+        ('Bug Tracker', 'https://github.com/AdamWangDoggie/sentry-dingtalk/issues'),
+        ('Source', 'https://github.com/AdamWangDoggie/sentry-dingtalk'),
     ]
 
     slug = 'dingtalk'
@@ -66,54 +73,103 @@ class DingtalkPlugin(notify.NotificationPlugin):
     logger = logging.getLogger('sentry.plugins.dingtalk')
 
     def is_configured(self, project, **kwargs):
-        return bool(self.get_option('urls', project))
+        return bool(self.get_option('urls', project)) and bool(self.get_option('secret', project))
 
     def get_config(self, project, **kwargs):
-        return [{
-            'name': 'urls',
-            'label': 'dingtalk robot url',
-            'type': 'textarea',
-            'help': 'Enter dingtalk robot url.',
-            'placeholder': 'https://oapi.dingtalk.com/robot/send?access_token=abcdefg',
-            'validators': [validate_urls],
-            'required': False
-        }]
+        return [
+            {
+                'name': 'urls',
+                'label': 'dingtalk robot webhook url',
+                'type': 'textarea',
+                'help': 'Enter dingtalk robot webhook url.',
+                'placeholder': 'https://oapi.dingtalk.com/robot/send?access_token=abcdefg',
+                'validators': [validate_urls],
+                'required': True
+            },
+            {
+                'name': 'secret',
+                'label': 'dingtalk robot secret',
+                'type': 'textarea',
+                'help': 'Enter dingtalk robot secret.',
+                'placeholder': 'SEC013ee62d708fb270f2c3d2bd20c9aaxxxxx',
+                'validators': [],
+                'required': True
+            },
+        ]
 
     def get_webhook_urls(self, project):
         url = self.get_option('urls', project)
-        if not url:
-            return ''
-        return url
+        return url or ''
 
-    def send_webhook(self, url, payload):
-        return safe_urlopen(
-            url=url,
-            json=payload,
-            timeout=self.timeout,
-            verify_ssl=False,
-        )
+    def get_secret(self, project):
+        secret = self.get_option('secret', project)
+        return secret or ''
 
     def get_group_url(self, group):
-        '''
-        return absolute_uri(reverse('sentry-group', args=[
-            group.organization.slug,
-            group.project.slug,
-            group.id,
-        ]))
-        '''
         return absolute_uri(group.get_absolute_url())
 
     def notify_users(self, group, event, *args, **kwargs):
-        url = self.get_webhook_urls(group.project)
-        link = self.get_group_url(group)
-        message_format = '[%s] %s   %s'
-        message = message_format % (event.server_name, event.message, link)
-        data = {"msgtype": "text",
-                "text": {
-                    "content": message
-                }
-                }
+        webhook = self.get_webhook_urls(group.project)
+        secret = self.get_secret(group.project)
+        millitimestamp = str(int(datetime.now().timestamp() * 1000))
+        to_sign = "%s\n%s" % (millitimestamp, secret)
+        signed = self.compute_sign(secret, to_sign)
+        webhook += "&timestamp=%s&sign=%s" % (millitimestamp, signed)
+
+        data = self.make_message_data(group, event)
         headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
-        r = requests.post(url, data=json.dumps(data), headers=headers)
+        try:
+            resp = requests.post(webhook, data=json.dumps(data), headers=headers)
+            resp_json = resp.json()
+        except Exception as e:
+            self.logger.error('[DingtalkPlugin]error when post webhook, %s', str(e))
+            return
+        if resp_json.get("errcode") != 0:
+            self.logger.error('[DingtalkPlugin]errcode: %s, errmsg: %s', str(resp_json.get('errcode')),
+                              str(resp_json.get('errmsg')))
+            return
 
+    def make_message_data(self, group, event):
+        if not event.prev_event_id:
+            first_seen = "NOW!!!"
+        else:
+            first_seen = group.first_seen.strftime("%Y-%m-%d %H:%M:%S")
 
+        now = timezone.now()
+        seen_in_5m = Event.objects.filter(
+            group_id=event.group_id,
+            datetime__gte=now - timedelta(seconds=300),
+        ).count()
+        seen_in_1h = Event.objects.filter(
+            group_id=event.group_id,
+            datetime__gte=now - timedelta(seconds=3600),
+        ).count()
+        seen_in_1d = Event.objects.filter(
+            group_id=event.group_id,
+            datetime__gte=now - timedelta(days=1),
+        ).count()
+        seen_in_total = group.times_seen
+
+        texts = [
+            "#### [Sentry]Error Occured in %s\n" % event.project.name,
+            "Error : %s\n" % event.title,
+            "> FirstSeen: %s\n" % first_seen,
+            "> Seen In 5m: %d\n" % seen_in_5m,
+            "> Seen In 1h: %d\n" % seen_in_1h,
+            "> Seen In 1d: %d\n" % seen_in_1d,
+            "> Seen In Total: %d\n" % seen_in_total,
+            "[View On Sentry](%s)\n" % self.get_group_url(group),
+        ]
+        data = {
+            "msgtype": "markdown",
+            "markdown": {
+                "text": "\n".join(texts),
+            }
+        }
+
+        return data
+
+    def compute_sign(self, secret, content):
+        message = content.encode(encoding="utf-8")
+        sec = secret.encode(encoding="utf-8")
+        return quote(base64.b64encode(hmac.new(sec, message, digestmod=hashlib.sha256).digest()))
