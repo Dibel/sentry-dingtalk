@@ -22,12 +22,13 @@ from sentry.plugins.bases import notify
 from sentry.utils.http import absolute_uri
 
 
-def retry_once(func):
+def retry_triple(func):
     def retry_wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except:
-            pass
+        for i in range(3):
+            try:
+                return func(*args, **kwargs)
+            except:
+                continue
         return func(*args, **kwargs)
 
     return retry_wrapper
@@ -170,7 +171,7 @@ class DingtalkPlugin4(notify.NotificationPlugin):
 
     def seen_in_current_hour(self, group, event):
         now = datetime.utcnow()
-        get_range = retry_once(tsdb.get_range)
+        get_range = retry_triple(tsdb.get_range)
         segments, interval = StatsPeriod(1, timedelta(hours=1))
         environment = event.get_environment()
 
@@ -189,7 +190,7 @@ class DingtalkPlugin4(notify.NotificationPlugin):
 
     def seen_today(self, group, event):
         now = datetime.utcnow()
-        get_range = retry_once(tsdb.get_range)
+        get_range = retry_triple(tsdb.get_range)
         segments, interval = StatsPeriod(1, timedelta(hours=24))
         environment = event.get_environment()
 
