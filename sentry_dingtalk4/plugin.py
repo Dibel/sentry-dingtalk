@@ -13,6 +13,7 @@ import requests
 import sentry
 from django import forms
 from django.conf import settings
+from django.utils import timezone
 from django.utils.translation import ugettext_lazy as _
 from sentry import tsdb
 from sentry.constants import StatsPeriod
@@ -170,7 +171,7 @@ class DingtalkPlugin4(notify.NotificationPlugin):
         return data
 
     def seen_in_current_hour(self, group, event):
-        now = datetime.utcnow()
+        now = timezone.now()
         get_range = retry_triple(tsdb.get_range)
         segments, interval = StatsPeriod(1, timedelta(hours=1))
         environment = event.get_environment()
@@ -189,7 +190,7 @@ class DingtalkPlugin4(notify.NotificationPlugin):
         return stats[group.id][0][1]
 
     def seen_today(self, group, event):
-        now = datetime.utcnow()
+        now = timezone.now()
         get_range = retry_triple(tsdb.get_range)
         segments, interval = StatsPeriod(1, timedelta(hours=24))
         environment = event.get_environment()
