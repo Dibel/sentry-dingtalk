@@ -13,8 +13,9 @@ import requests
 import sentry
 from django import forms
 from django.conf import settings
-from django.utils import timezone
 from django.utils.translation import ugettext_lazy as _
+from sentry import tsdb
+from sentry.constants import StatsPeriod
 from sentry.exceptions import PluginError
 from sentry.http import is_valid_url
 from sentry.models.event import Event
@@ -132,6 +133,35 @@ class DingtalkPlugin4(notify.NotificationPlugin):
 
     def make_message_data(self, group, event):
         first_seen = (group.first_seen + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
+            now = datetime.utcnow()
+            self.logger.info("make_message_data now: %s" % str(now))
+
+            environment = event.get_environment()
+
+            StatsPeriod5m = StatsPeriod(1, timedelta(minutes=5))
+            segments, interval = StatsPeriod5m
+
+            query_params = {
+                'start': now - ((segments - 1) * interval),
+                'end': now,
+                'rollup': int(interval.total_seconds()),
+            }
+            stats = tsdb.get_range(
+                model=tsdb.models.group,
+                keys=[group.id],
+                environment_ids=environment and [environment.id],
+                **query_params
+            )
+            self.logger.info("make_message_data stats: %s" % json.dumps(stats))
+            #
+            # StatsPeriod1h = StatsPeriod(1, timedelta(hours=1))
+            # StatsPeriod1d = StatsPeriod(1, timedelta(days=1))
+
+
+        except Exception as e:
+            self.logger.error("make_message_data error: %s" % str(e))
 
         now = datetime.utcnow()
         seen_in_5m = Event.objects.filter(
