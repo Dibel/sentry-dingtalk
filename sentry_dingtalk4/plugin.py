@@ -6,7 +6,7 @@ import hmac
 import json
 import logging
 import time
-from datetime import datetime, timedelta, tzinfo
+from datetime import datetime, timedelta
 from urllib import quote
 
 import requests
@@ -18,9 +18,19 @@ from sentry import tsdb
 from sentry.constants import StatsPeriod
 from sentry.exceptions import PluginError
 from sentry.http import is_valid_url
-from sentry.models.event import Event
 from sentry.plugins.bases import notify
 from sentry.utils.http import absolute_uri
+
+
+def retry_once(func):
+    def retry_wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except:
+            pass
+        return func(*args, **kwargs)
+
+    return retry_wrapper
 
 
 def validate_urls4(value, **kwargs):
@@ -133,61 +143,20 @@ class DingtalkPlugin4(notify.NotificationPlugin):
 
     def make_message_data(self, group, event):
         first_seen = (group.first_seen + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
-        now = datetime.utcnow()
 
-        try:
-            environment = event.get_environment()
-
-            StatsPeriod5m = StatsPeriod(2, timedelta(minutes=5))
-            segments, interval = StatsPeriod5m
-
-            query_params = {
-                'start': now - ((segments - 1) * interval),
-                'end': now,
-                'rollup': int(interval.total_seconds()),
-            }
-            stats = tsdb.get_range(
-                model=tsdb.models.group,
-                keys=[group.id],
-                environment_ids=environment and [environment.id],
-                **query_params
-            )
-            stats_str = json.dumps(stats)
-            #
-            # StatsPeriod1h = StatsPeriod(1, timedelta(hours=1))
-            # StatsPeriod1d = StatsPeriod(1, timedelta(days=1))
-
-
-        except Exception as e:
-            self.logger.error("make_message_data error: %s" % str(e))
-            stats_str = ""
-
-        now = datetime.utcnow()
-        seen_in_5m = Event.objects.filter(
-            group_id=event.group_id,
-            datetime__gte=now - timedelta(seconds=300),
-        ).count()
-        seen_in_1h = Event.objects.filter(
-            group_id=event.group_id,
-            datetime__gte=now - timedelta(seconds=3600),
-        ).count()
-        seen_in_1d = Event.objects.filter(
-            group_id=event.group_id,
-            datetime__gte=now - timedelta(days=1),
-        ).count()
-        seen_in_total = group.times_seen + 1  # current event wasn't counted yet
+        seen_in_current_hour = self.seen_in_current_hour(group, event)
+        seen_today = self.seen_today(group, event)
+        seen_in_total = group.times_seen
 
         title = "#### [Sentry]Error Occured in %s\n" % event.project.name
         texts = [
             title,
             "Error : %s\n" % event.title,
             "> FirstSeen: %s\n" % first_seen,
-            "> Seen In 5m: %d\n" % seen_in_5m,
-            "> Seen In 1h: %d\n" % seen_in_1h,
-            "> Seen In 1d: %d\n" % seen_in_1d,
+            "> Seen In current hour: %d\n" % seen_in_current_hour,
+            "> Seen Today: %d\n" % seen_today,
             "> Seen In Total: %d\n" % seen_in_total,
             "[View On Sentry](%s)\n" % self.get_group_url(group),
-            "> StatsStr: %s\n" % stats_str,
         ]
         data = {
             "msgtype": "markdown",
@@ -199,6 +168,44 @@ class DingtalkPlugin4(notify.NotificationPlugin):
 
         return data
 
+    def seen_in_current_hour(self, group, event):
+        now = datetime.utcnow()
+        get_range = retry_once(tsdb.get_range)
+        segments, interval = StatsPeriod(1, timedelta(hours=1))
+        environment = event.get_environment()
+
+        query_params = {
+            'start': now - ((segments - 1) * interval),
+            'end': now,
+            'rollup': int(interval.total_seconds()),
+        }
+        stats = get_range(
+            model=tsdb.models.group,
+            keys=[group.id],
+            environment_ids=environment and [environment.id],
+            **query_params
+        )
+        return stats[group.id][0][1]
+
+    def seen_today(self, group, event):
+        now = datetime.utcnow()
+        get_range = retry_once(tsdb.get_range)
+        segments, interval = StatsPeriod(1, timedelta(hours=24))
+        environment = event.get_environment()
+
+        query_params = {
+            'start': now - ((segments - 1) * interval),
+            'end': now,
+            'rollup': int(interval.total_seconds()),
+        }
+        stats = get_range(
+            model=tsdb.models.group,
+            keys=[group.id],
+            environment_ids=environment and [environment.id],
+            **query_params
+        )
+        return stats[group.id][0][1]
+
     def compute_sign(self, secret, content):
         message = content.encode(encoding="utf-8")
         sec = secret.encode(encoding="utf-8")
@@ -207,23 +214,3 @@ class DingtalkPlugin4(notify.NotificationPlugin):
     @staticmethod
     def timestamp(dt):
         return int((time.mktime(dt.timetuple()) + dt.microsecond / 1000000.0))
-
-
-class TimezoneChongqing(tzinfo):
-    """
-    UTC implementation taken from Python's docs.
-
-    Used only when pytz isn't available.
-    """
-
-    def __repr__(self):
-        return "<Asia/Chongqing>"
-
-    def utcoffset(self, dt):
-        return timedelta(hours=8)
-
-    def tzname(self, dt):
-        return "Asia/Chongqing"
-
-    def dst(self, dt):
-        return timedelta(hours=8)
