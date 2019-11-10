@@ -133,14 +133,12 @@ class DingtalkPlugin4(notify.NotificationPlugin):
 
     def make_message_data(self, group, event):
         first_seen = (group.first_seen + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.utcnow()
 
         try:
-            now = datetime.utcnow()
-            self.logger.info("make_message_data now: %s" % str(now))
-
             environment = event.get_environment()
 
-            StatsPeriod5m = StatsPeriod(1, timedelta(minutes=5))
+            StatsPeriod5m = StatsPeriod(2, timedelta(minutes=5))
             segments, interval = StatsPeriod5m
 
             query_params = {
@@ -154,7 +152,7 @@ class DingtalkPlugin4(notify.NotificationPlugin):
                 environment_ids=environment and [environment.id],
                 **query_params
             )
-            self.logger.info("make_message_data stats: %s" % json.dumps(stats))
+            stats_str = json.dumps(stats)
             #
             # StatsPeriod1h = StatsPeriod(1, timedelta(hours=1))
             # StatsPeriod1d = StatsPeriod(1, timedelta(days=1))
@@ -162,6 +160,7 @@ class DingtalkPlugin4(notify.NotificationPlugin):
 
         except Exception as e:
             self.logger.error("make_message_data error: %s" % str(e))
+            stats_str = ""
 
         now = datetime.utcnow()
         seen_in_5m = Event.objects.filter(
@@ -188,6 +187,7 @@ class DingtalkPlugin4(notify.NotificationPlugin):
             "> Seen In 1d: %d\n" % seen_in_1d,
             "> Seen In Total: %d\n" % seen_in_total,
             "[View On Sentry](%s)\n" % self.get_group_url(group),
+            "> StatsStr: %s\n" % stats_str,
         ]
         data = {
             "msgtype": "markdown",
