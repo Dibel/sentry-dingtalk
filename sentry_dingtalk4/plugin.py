@@ -123,6 +123,11 @@ class DingtalkPlugin4(notify.NotificationPlugin):
         return absolute_uri(group.get_absolute_url())
 
     def notify_users(self, group, event, *args, **kwargs):
+        if group.is_ignored():
+            return
+        if not self.should_notify(group, event):
+            self.logger.info('[DingtalkPlugin]ignored notification')
+            return
         webhook = self.get_webhook_urls(group.project)
         secret = self.get_secret(group.project)
         millitimestamp = str(int(self.timestamp(datetime.now()) * 1000))
