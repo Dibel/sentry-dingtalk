@@ -109,6 +109,27 @@ class DingtalkPlugin4(notify.NotificationPlugin):
                 'validators': [],
                 'required': True
             },
+            {
+                'name': 'type',
+                'label': 'Choose the format of notification',
+                'type': 'choice',
+                'help': 'Choose the format of notification(text or markdown)',
+                "choices": [
+                    ("0", "Markdown"),
+                    ("1", "Text"),
+                ],
+                'default': "0",
+                'required': True
+            },
+            {
+                'name': 'at_phones',
+                'label': 'The phone number you want to @ (use "all" if you want to @all',
+                'type': 'textarea',
+                'help': 'Enter the phone number you want to @. Use comma to split numbers.',
+                'placeholder': 'all',
+                'validators': [],
+                'required': False
+            }
         ]
 
     def get_webhook_urls(self, project):
@@ -118,6 +139,10 @@ class DingtalkPlugin4(notify.NotificationPlugin):
     def get_secret(self, project):
         secret = self.get_option('secret', project)
         return secret or ''
+
+    def get_at_phones(self, project):
+        at_phones = self.get_option('at_phones', project)
+        return at_phones or ''
 
     def get_group_url(self, group):
         return absolute_uri(group.get_absolute_url())
@@ -135,7 +160,9 @@ class DingtalkPlugin4(notify.NotificationPlugin):
         signed = self.compute_sign(secret, to_sign)
         webhook += "&timestamp=%s&sign=%s" % (millitimestamp, signed)
 
-        data = self.make_message_data(group, event)
+        data_type = int(self.get_option('type', group.project) or 0)
+
+        data = self.make_message_data(group, event, data_type)
         headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
         try:
             resp = requests.post(webhook, data=json.dumps(data), headers=headers)
@@ -148,32 +175,106 @@ class DingtalkPlugin4(notify.NotificationPlugin):
                               str(resp_json.get('errmsg')))
             return
 
-    def make_message_data(self, group, event):
+    def make_message_data(self, group, event, data_type):
         first_seen = (group.first_seen + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
 
+        seen_in_minute = self.seen_in_minutes(group, event, 1)
+        seen_in_ten_minute = self.seen_in_minutes(group, event, 10)
         seen_in_current_hour = self.seen_in_current_hour(group, event)
         seen_today = self.seen_today(group, event)
         seen_in_total = group.times_seen
 
-        title = "#### [Sentry]Error Occured in %s\n" % event.project.name
-        texts = [
-            title,
-            "Error : %s\n" % event.title,
-            "> FirstSeen: %s\n" % first_seen,
-            "> Seen In current hour: %d\n" % seen_in_current_hour,
-            "> Seen Today: %d\n" % seen_today,
-            "> Seen In Total: %d\n" % seen_in_total,
-            "[View On Sentry](%s)\n" % self.get_group_url(group),
-        ]
-        data = {
-            "msgtype": "markdown",
-            "markdown": {
-                "title": title,
-                "text": "\n".join(texts),
+        culprit = group.culprit
+        culprit_str = ""
+        if culprit:
+            culprit_str = "模块: %s\n" % culprit
+
+        level = event.get_tag("level")
+        if level in ("info", "debug"):
+            message_type = "INFO"
+        if level == "warning":
+            message_type = "WARN"
+        else:
+            message_type = "ERROR"
+
+        at_phones = self.get_at_phones(group.project)
+        if at_phones == '':
+            at_string = ""
+            at_dict = {}
+        elif at_phones == 'all':
+            at_string = " @all"
+            at_dict = {'isAtAll': True}
+        else:
+            phones = at_phones.split(',')
+            at_string = " @" + " @".join(phones)
+            at_dict = {'atMobiles': phones}
+
+        current_time = datetime.now().strftime("%H:%M:%S")
+
+        if data_type == 0:
+
+            title = "[报警][%s] 项目: %s\n" % (message_type, event.project.name)
+            texts = [
+                "### " + title,
+                "**错误**: %s\n" % event.title,
+                "**消息**: %s\n" % event.message,
+                "> " + culprit_str,
+                "> 环境: %s\n" % (event.get_environment().name),
+                "> 首次发生于: %s\n" % first_seen,
+                "> 一分钟内发生: %d次&emsp;&emsp;十分钟内发生: %d次\n" % (seen_in_minute, seen_in_ten_minute),
+                "> 一小时内发生: %d次&emsp;&emsp;24小时内发生: %d次\n" % (seen_in_current_hour, seen_today),
+                "###### %s [View In Sentry](%s)%s\n"
+                % (current_time, self.get_group_url(group), at_string),
+            ]
+
+            data = {
+                "msgtype": "markdown",
+                "markdown": {
+                    "title": title,
+                    "text": "\n".join(texts),
+                },
+                "at": at_dict
             }
-        }
+        else:
+            texts = [
+                "[报警][%s] 项目: %s\n" % (message_type, event.project.name),
+                "错误: %s\n" % event.title,
+                "消息: %s\n" % event.message,
+                culprit_str,
+                "环境: %s\n" % (event.get_environment().name),
+                "首次发生于: %s\n" % first_seen,
+                "一分钟内发生: %d次  十分钟内发生: %d次\n" % (seen_in_minute, seen_in_ten_minute),
+                "一小时内发生: %d次  24小时内发生: %d次\n" % (seen_in_current_hour, seen_today),
+                "链接: %s\n" % self.get_group_url(group)
+            ]
+            data = {
+                "msgtype": "text",
+                "text": {
+                    "content": "".join(texts),
+                },
+                "at": at_dict
+            }
 
         return data
+
+    def seen_in_minutes(self, group, event, minutes=1):
+        now = timezone.now()
+        get_range = retry_triple(tsdb.get_range)
+        segments, interval = StatsPeriod(1, timedelta(minutes=minutes))
+        environment = event.get_environment()
+
+        query_params = {
+            'start': now - ((segments - 1) * interval),
+            'end': now,
+            'rollup': int(interval.total_seconds()),
+        }
+        stats = get_range(
+            model=tsdb.models.group,
+            keys=[group.id],
+            environment_ids=environment and [environment.id],
+            **query_params
+        )
+        return stats[group.id][0][1]
 
     def seen_in_current_hour(self, group, event):
         now = timezone.now()
