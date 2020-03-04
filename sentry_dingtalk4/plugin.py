@@ -37,112 +37,116 @@ def retry_triple(func):
 
 def validate_urls4(value, **kwargs):
     output = []
-    for url in value.split('\n'):
+    for url in value.split("\n"):
         url = url.strip()
         if not url:
             continue
-        if not url.startswith(('http://', 'https://')):
-            raise PluginError('Not a valid URL.')
+        if not url.startswith(("http://", "https://")):
+            raise PluginError("Not a valid URL.")
         if not is_valid_url(url):
-            raise PluginError('Not a valid URL.')
+            raise PluginError("Not a valid URL.")
         output.append(url)
-    return '\n'.join(output)
+    return "\n".join(output)
 
 
 class DingtalkForm4(notify.NotificationConfigurationForm):
     urls = forms.CharField(
-        label=_('Dingtalk robot webhook url'),
-        widget=forms.Textarea(attrs={
-            'class': 'span6', 'placeholder': 'https://oapi.dingtalk.com/robot/send?access_token=9bacf9b193f'}),
-        help_text=_('Enter dingtalk robot webhook url.'))
+        label=_("Dingtalk robot webhook url"),
+        widget=forms.Textarea(
+            attrs={
+                "class": "span6",
+                "placeholder": "https://oapi.dingtalk.com/robot/send?access_token=9bacf9b193f",
+            }
+        ),
+        help_text=_("Enter dingtalk robot webhook url."),
+    )
 
     secret = forms.CharField(
-        label=_('Dingtalk robot secret'),
-        widget=forms.Textarea(attrs={
-            'class': 'span6', 'placeholder': 'SEC013ee62d708fb270f2c3d2bd20c9aaxxxxx'}),
-        help_text=_('Enter dingtalk robot secret.'))
+        label=_("Dingtalk robot secret"),
+        widget=forms.Textarea(
+            attrs={"class": "span6", "placeholder": "SEC013ee62d708fb270f2c3d2bd20c9aaxxxxx"}
+        ),
+        help_text=_("Enter dingtalk robot secret."),
+    )
 
     def clean_url(self):
-        value = self.cleaned_data.get('url')
+        value = self.cleaned_data.get("url")
         return validate_urls4(value)
 
 
 class DingtalkPlugin4(notify.NotificationPlugin):
-    author = 'AdamWang'
-    author_url = 'https://github.com/AdamWangDoggie/sentry-dingtalk'
+    author = "AdamWang"
+    author_url = "https://github.com/AdamWangDoggie/sentry-dingtalk"
     version = sentry.VERSION
     description = "Integrates dingtalk robot(dingtalk version>=4.7.15)."
     resource_links = [
-        ('Bug Tracker', 'https://github.com/AdamWangDoggie/sentry-dingtalk/issues'),
-        ('Source', 'https://github.com/AdamWangDoggie/sentry-dingtalk'),
+        ("Bug Tracker", "https://github.com/AdamWangDoggie/sentry-dingtalk/issues"),
+        ("Source", "https://github.com/AdamWangDoggie/sentry-dingtalk"),
     ]
 
-    slug = 'dingtalk4'
-    title = 'dingtalk4'
+    slug = "dingtalk4"
+    title = "dingtalk4"
     conf_title = title
-    conf_key = 'dingtalk4'
+    conf_key = "dingtalk4"
 
     project_conf_form = DingtalkForm4
-    timeout = getattr(settings, 'SENTRY_DINGTALK_TIMEOUT', 3)
-    logger = logging.getLogger('sentry.plugins.dingtalk')
+    timeout = getattr(settings, "SENTRY_DINGTALK_TIMEOUT", 3)
+    logger = logging.getLogger("sentry.plugins.dingtalk")
 
     def is_configured(self, project, **kwargs):
-        return bool(self.get_option('urls', project)) and bool(self.get_option('secret', project))
+        return bool(self.get_option("urls", project)) and bool(self.get_option("secret", project))
 
     def get_config(self, project, **kwargs):
         return [
             {
-                'name': 'urls',
-                'label': 'dingtalk robot webhook url',
-                'type': 'textarea',
-                'help': 'Enter dingtalk robot webhook url.',
-                'placeholder': 'https://oapi.dingtalk.com/robot/send?access_token=abcdefg',
-                'validators': [validate_urls4],
-                'required': True
+                "name": "urls",
+                "label": "dingtalk robot webhook url",
+                "type": "textarea",
+                "help": "Enter dingtalk robot webhook url.",
+                "placeholder": "https://oapi.dingtalk.com/robot/send?access_token=abcdefg",
+                "validators": [validate_urls4],
+                "required": True,
             },
             {
-                'name': 'secret',
-                'label': 'dingtalk robot secret',
-                'type': 'textarea',
-                'help': 'Enter dingtalk robot secret.',
-                'placeholder': 'SEC013ee62d708fb270f2c3d2bd20c9aaxxxxx',
-                'validators': [],
-                'required': True
+                "name": "secret",
+                "label": "dingtalk robot secret",
+                "type": "textarea",
+                "help": "Enter dingtalk robot secret.",
+                "placeholder": "SEC013ee62d708fb270f2c3d2bd20c9aaxxxxx",
+                "validators": [],
+                "required": True,
             },
             {
-                'name': 'type',
-                'label': 'Choose the format of notification',
-                'type': 'choice',
-                'help': 'Choose the format of notification(text or markdown)',
-                "choices": [
-                    ("0", "Markdown"),
-                    ("1", "Text"),
-                ],
-                'default': "0",
-                'required': True
+                "name": "type",
+                "label": "Choose the format of notification",
+                "type": "choice",
+                "help": "Choose the format of notification(text or markdown)",
+                "choices": [("0", "Markdown"), ("1", "Text"),],
+                "default": "0",
+                "required": True,
             },
             {
-                'name': 'at_phones',
-                'label': 'The phone number you want to @ (use "all" if you want to @all',
-                'type': 'textarea',
-                'help': 'Enter the phone number you want to @. Use comma to split numbers.',
-                'placeholder': 'all',
-                'validators': [],
-                'required': False
-            }
+                "name": "at_phones",
+                "label": 'The phone number you want to @ (use "all" if you want to @all',
+                "type": "textarea",
+                "help": "Enter the phone number you want to @. Use comma to split numbers.",
+                "placeholder": "all",
+                "validators": [],
+                "required": False,
+            },
         ]
 
     def get_webhook_urls(self, project):
-        url = self.get_option('urls', project)
-        return url or ''
+        url = self.get_option("urls", project)
+        return url or ""
 
     def get_secret(self, project):
-        secret = self.get_option('secret', project)
-        return secret or ''
+        secret = self.get_option("secret", project)
+        return secret or ""
 
     def get_at_phones(self, project):
-        at_phones = self.get_option('at_phones', project)
-        return at_phones or ''
+        at_phones = self.get_option("at_phones", project)
+        return at_phones or ""
 
     def get_group_url(self, group):
         return absolute_uri(group.get_absolute_url())
@@ -151,7 +155,7 @@ class DingtalkPlugin4(notify.NotificationPlugin):
         if group.is_ignored():
             return
         if not self.should_notify(group, event):
-            self.logger.info('[DingtalkPlugin]ignored notification')
+            self.logger.info("[DingtalkPlugin]ignored notification")
             return
         webhook = self.get_webhook_urls(group.project)
         secret = self.get_secret(group.project)
@@ -160,19 +164,22 @@ class DingtalkPlugin4(notify.NotificationPlugin):
         signed = self.compute_sign(secret, to_sign)
         webhook += "&timestamp=%s&sign=%s" % (millitimestamp, signed)
 
-        data_type = int(self.get_option('type', group.project) or 0)
+        data_type = int(self.get_option("type", group.project) or 0)
 
         data = self.make_message_data(group, event, data_type)
-        headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+        headers = {"Content-type": "application/json", "Accept": "text/plain"}
         try:
             resp = requests.post(webhook, data=json.dumps(data), headers=headers)
             resp_json = resp.json()
         except Exception as e:
-            self.logger.error('[DingtalkPlugin]error when post webhook, %s', str(e))
+            self.logger.error("[DingtalkPlugin]error when post webhook, %s", str(e))
             return
         if resp_json.get("errcode") != 0:
-            self.logger.error('[DingtalkPlugin]errcode: %s, errmsg: %s', str(resp_json.get('errcode')),
-                              str(resp_json.get('errmsg')))
+            self.logger.error(
+                "[DingtalkPlugin]errcode: %s, errmsg: %s",
+                str(resp_json.get("errcode")),
+                str(resp_json.get("errmsg")),
+            )
             return
 
     def make_message_data(self, group, event, data_type):
@@ -198,16 +205,22 @@ class DingtalkPlugin4(notify.NotificationPlugin):
             message_type = "ERROR"
 
         at_phones = self.get_at_phones(group.project)
-        if at_phones == '':
+        if at_phones == "":
             at_string = ""
             at_dict = {}
-        elif at_phones == 'all':
+        elif at_phones == "all":
             at_string = " @all"
-            at_dict = {'isAtAll': True}
+            at_dict = {"isAtAll": True}
         else:
-            phones = at_phones.split(',')
+            phones = at_phones.split(",")
             at_string = " @" + " @".join(phones)
-            at_dict = {'atMobiles': phones}
+            at_dict = {"atMobiles": phones}
+
+        trace_id = event.get_tag("trace_id")
+        if trace_id:
+            trace_id_str = "trace_id: %s\n" % trace_id
+        else:
+            trace_id_str = ""
 
         current_time = datetime.now().strftime("%H:%M:%S")
 
@@ -218,8 +231,10 @@ class DingtalkPlugin4(notify.NotificationPlugin):
                 "### " + title,
                 "**错误**: %s\n" % event.title,
                 "**消息**: %s\n" % event.message,
+                trace_id_str,
                 "> " + culprit_str,
-                "> 环境: %s\n" % (event.get_environment().name),
+                "> 环境: %s&emsp;&emsp;IP: %s\n"
+                % (event.get_environment().name, event.get_tag("server_name")),
                 "> 首次发生于: %s\n" % first_seen,
                 "> 一分钟内发生: %d次&emsp;&emsp;十分钟内发生: %d次\n" % (seen_in_minute, seen_in_ten_minute),
                 "> 一小时内发生: %d次&emsp;&emsp;24小时内发生: %d次\n" % (seen_in_current_hour, seen_today),
@@ -229,31 +244,23 @@ class DingtalkPlugin4(notify.NotificationPlugin):
 
             data = {
                 "msgtype": "markdown",
-                "markdown": {
-                    "title": title,
-                    "text": "\n".join(texts),
-                },
-                "at": at_dict
+                "markdown": {"title": title, "text": "\n".join(texts)},
+                "at": at_dict,
             }
         else:
             texts = [
                 "[报警][%s] 项目: %s\n" % (message_type, event.project.name),
                 "错误: %s\n" % event.title,
                 "消息: %s\n" % event.message,
+                trace_id_str,
                 culprit_str,
-                "环境: %s\n" % (event.get_environment().name),
+                "环境: %s  IP: %s\n" % (event.get_environment().name, event.get_tag("server_name")),
                 "首次发生于: %s\n" % first_seen,
                 "一分钟内发生: %d次  十分钟内发生: %d次\n" % (seen_in_minute, seen_in_ten_minute),
                 "一小时内发生: %d次  24小时内发生: %d次\n" % (seen_in_current_hour, seen_today),
-                "链接: %s\n" % self.get_group_url(group)
+                "链接: %s\n" % self.get_group_url(group),
             ]
-            data = {
-                "msgtype": "text",
-                "text": {
-                    "content": "".join(texts),
-                },
-                "at": at_dict
-            }
+            data = {"msgtype": "text", "text": {"content": "".join(texts)}, "at": at_dict}
 
         return data
 
@@ -264,9 +271,9 @@ class DingtalkPlugin4(notify.NotificationPlugin):
         environment = event.get_environment()
 
         query_params = {
-            'start': now - ((segments - 1) * interval),
-            'end': now,
-            'rollup': int(interval.total_seconds()),
+            "start": now - ((segments - 1) * interval),
+            "end": now,
+            "rollup": int(interval.total_seconds()),
         }
         stats = get_range(
             model=tsdb.models.group,
@@ -283,9 +290,9 @@ class DingtalkPlugin4(notify.NotificationPlugin):
         environment = event.get_environment()
 
         query_params = {
-            'start': now - ((segments - 1) * interval),
-            'end': now,
-            'rollup': int(interval.total_seconds()),
+            "start": now - ((segments - 1) * interval),
+            "end": now,
+            "rollup": int(interval.total_seconds()),
         }
         stats = get_range(
             model=tsdb.models.group,
@@ -302,9 +309,9 @@ class DingtalkPlugin4(notify.NotificationPlugin):
         environment = event.get_environment()
 
         query_params = {
-            'start': now - ((segments - 1) * interval),
-            'end': now,
-            'rollup': int(interval.total_seconds()),
+            "start": now - ((segments - 1) * interval),
+            "end": now,
+            "rollup": int(interval.total_seconds()),
         }
         stats = get_range(
             model=tsdb.models.group,
